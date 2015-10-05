@@ -7,14 +7,13 @@ module ActiveRecord
       module ClassMethods
         def acts_as(name, scope = nil, options = {})
           options, scope = scope, nil if Hash === scope
-          options = {as: :actable, dependent: :destroy, validate: false, autosave: true}.merge options
+          options = {autosave: true}.merge options
 
           cattr_reader(:validates_actable) { options.delete(:validates_actable) == false ? false : true }
 
-          reflections = has_one name, scope, options
+          reflections = belongs_to name, scope, options
           default_scope -> { eager_load(name) }
           validate :actable_must_be_valid
-
           cattr_reader(:acting_as_reflection) { reflections.stringify_keys[name.to_s] }
           cattr_reader(:acting_as_name) { name.to_s }
           cattr_reader(:acting_as_model) { (options[:class_name] || name.to_s.camelize).constantize }
@@ -47,19 +46,20 @@ module ActiveRecord
           super || acting_as?(klass)
         end
 
-        def actable(options = {})
-          name = options.delete(:as) || :actable
+        def actable(acting_as_list = [], options = {})
+          raise "Must have atleast one acting_as_list" unless acting_as_list.present?
 
-          reflections = belongs_to name, {polymorphic: true, dependent: :delete, autosave: true}.merge(options)
-
-          cattr_reader(:actable_reflection) { reflections.stringify_keys[name.to_s] }
-
-          alias_method :specific, name
+          actable_reflections = {}
+          acting_as_list.each do |name|
+            reflections = has_one name, options
+            actable_reflections[name.to_s] = reflections.stringify_keys[name.to_s]
+          end
+          cattr_reader(:actable_reflections) { actable_reflections }
         end
 
         def actable?
-          respond_to?(:actable_reflection) &&
-            actable_reflection.is_a?(ActiveRecord::Reflection::AssociationReflection)
+          respond_to?(:actable_reflections) &&
+            actable_reflections.first.last.is_a?(ActiveRecord::Reflection::AssociationReflection)
         end
       end
     end
