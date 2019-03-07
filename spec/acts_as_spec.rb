@@ -16,6 +16,10 @@ RSpec.describe "ActiveRecord::Base model with #acts_as called" do
     expect(association.options).to have_key(:as)
   end
 
+  it "autobuilds the has_one relation" do
+    expect(subject.new.product).not_to be_nil
+  end
+
   it "has a cattr_reader for the acting_as_model" do
     expect(subject.acting_as_model).to eq Product
   end
@@ -188,7 +192,18 @@ RSpec.describe "ActiveRecord::Base model with #acts_as called" do
       isolated_pen.reload
       expect(pen.option1).to eq('value1')
       expect(isolated_pen).to_not respond_to('option1')
-      expect(JSON.parse(pen.to_json)).to eq(JSON.parse('{"id":' + pen.id.to_s + ',"name":"pen","price":0.8,"store_id":null,"settings":{"global_option":"globalvalue","option1":"value1"},"color":"red"}'))
+      expect(JSON.parse(pen.to_json)).to eq(JSON.parse('''
+        {
+          "id": '+ pen.id.to_s + ',
+          "name": "pen",
+          "price": 0.8,
+          "store_id": null,
+          "settings": {"global_option":"globalvalue", "option1":"value1"},
+          "color": "red",
+          "created_at": ' + pen.created_at.to_json + ',
+          "updated_at": ' + pen.updated_at.to_json + '
+        }
+      '''))
     end
 
     it "saves supermodel attributes on save" do
@@ -197,6 +212,15 @@ RSpec.describe "ActiveRecord::Base model with #acts_as called" do
       expect(pen.name).to eq('pen')
       expect(pen.price).to eq(0.8)
       expect(pen.color).to eq('red')
+    end
+
+    it "touches supermodel on save" do
+      pen.save
+      pen.reload
+      update = pen.product.updated_at
+      pen.color = "gray"
+      pen.save
+      expect(pen.updated_at).not_to eq(update)
     end
 
     it "raises NoMethodEror on unexisting method call" do
@@ -250,10 +274,22 @@ RSpec.describe "ActiveRecord::Base model with #acts_as called" do
       it "unless the submodel instance association doesn't exist" do
         expect(JSON.parse(isolated_pen.to_json)).to eq(JSON.parse('{"id":null,"color":"red"}'))
       end
+
       it "if the submodel instance association exists" do
         p = Product.new(name: 'Test Pen', price: 0.8, actable: pen)
         p.save
-        expect(JSON.parse(pen.to_json)).to eq(JSON.parse('{"id":' + pen.id.to_s + ',"name":"pen","price":0.8,"store_id":null,"settings": {},"color":"red"}'))
+        expect(JSON.parse(pen.to_json)).to eq(JSON.parse('''
+          {
+            "id": '+ pen.id.to_s + ',
+            "name": "pen",
+            "price": 0.8,
+            "store_id": null,
+            "settings": {},
+            "color": "red",
+            "created_at": ' + pen.created_at.to_json + ',
+            "updated_at": ' + pen.updated_at.to_json + '
+          }
+        '''))
       end
     end
 
@@ -311,6 +347,56 @@ RSpec.describe "ActiveRecord::Base model with #acts_as called" do
 
     it "has a cattr_reader for the acting_as_model" do
       expect(subject.acting_as_model).to eq Inventory::ProductFeature
+    end
+  end
+
+  context 'different association_methods' do
+    before(:each) do
+      Object.send(:remove_const, :Pen)
+    end
+
+    it "should not include the selected attribute when associating using 'eager_load'" do
+      class Pen < ActiveRecord::Base
+        acts_as :product , {association_method: :eager_load}
+        store_accessor :settings, :option1
+        validates_presence_of :color
+      end
+      Pen.create pen_attributes
+
+      expect(Pen.select("'something' as thing").first['thing']).to be_nil
+    end
+
+    it "should include the selected attribute in the model when associating using 'includes'" do
+      class Pen < ActiveRecord::Base
+        acts_as :product , {association_method: :includes}
+        store_accessor :settings, :option1
+        validates_presence_of :color
+      end
+      Pen.create pen_attributes
+
+      expect(Pen.select("'something' as thing").first['thing']).to eq 'something'
+    end
+
+    it "should include the selected attribute in the model not specifying an association_method" do
+      class Pen < ActiveRecord::Base
+        acts_as :product
+        store_accessor :settings, :option1
+        validates_presence_of :color
+      end
+      Pen.create pen_attributes
+
+      expect(Pen.select("'something' as thing").first['thing']).to eq 'something'
+    end
+
+    it "should include a selected attribute from the parent when associating using 'joins'" do
+      class Pen < ActiveRecord::Base
+        acts_as :product, {association_method: :joins}
+        store_accessor :settings, :option1
+        validates_presence_of :color
+      end
+      Pen.create pen_attributes
+
+      expect(Pen.select("price as thing").first['thing']).to eq 0.8
     end
   end
 end
